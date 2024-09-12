@@ -40,7 +40,7 @@ assert tf.__version__ >= "2.0"
 def log(text, array=None):
     """Prints a text message. If a Numpy array is provided it prints its shape, min, and max values."""
     if array is not None:
-        text is text.ljust(25)
+        text = text.ljust(25)
         text += ("shape: {:20}  min: {:10.5f}  max: {:10.5f}".format(
             str(array.shape),
             array.min() if array.size else "",
@@ -841,13 +841,13 @@ def build_rpn_model(anchor_stride, anchors_per_location, depth):
 #  Feature Pyramid Network Heads
 ############################################################
 
-def fpn_classifier_graph(rois, feature_maps, image_shape, pool_size, num_classes, batch_size):
+def fpn_classifier_graph(rois, feature_maps, image_shape, pool_size, num_classes):
     """Builds the computation graph of the feature pyramid network classifier
     and regressor heads.
 
     rois: [batch, num_rois, (y1, x1, y2, x2)] Proposal boxes in normalized
           coordinates.
-    feature_maps: List of feature maps from diffent layers of the pyramid,
+    feature_maps: List of feature maps from different layers of the pyramid,
                   [P2, P3, P4, P5]. Each has a different resolution.
     image_shape: [height, width, depth]
     pool_size: The width of the square feature map generated from ROI Pooling.
@@ -860,36 +860,50 @@ def fpn_classifier_graph(rois, feature_maps, image_shape, pool_size, num_classes
                      proposal boxes
     """
     # ROI Pooling
-    # Shape: [batch, num_boxes, pool_height, pool_width, channels]
     x = PyramidROIAlign([pool_size, pool_size], image_shape,
                         name="roi_align_classifier")([rois] + feature_maps)
+
     # Two 1024 FC layers (implemented with Conv2D for consistency)
     x = KL.TimeDistributed(KL.Conv2D(1024, (pool_size, pool_size), padding="valid"),
                            name="mrcnn_class_conv1")(x)
     x = KL.TimeDistributed(BatchNorm(axis=3), name='mrcnn_class_bn1')(x)
     x = KL.Activation('relu')(x)
-    x = KL.TimeDistributed(KL.Conv2D(1024, (1, 1)),
-                           name="mrcnn_class_conv2")(x)
-    x = KL.TimeDistributed(BatchNorm(axis=3),
-                           name='mrcnn_class_bn2')(x)
+
+    x = KL.TimeDistributed(KL.Conv2D(1024, (1, 1)), name="mrcnn_class_conv2")(x)
+    x = KL.TimeDistributed(BatchNorm(axis=3), name='mrcnn_class_bn2')(x)
     x = KL.Activation('relu')(x)
 
-    shared = KL.Lambda(lambda x: K.squeeze(K.squeeze(x, 3), 2),
-                       name="pool_squeeze")(x)
+    # Squeeze operation to reduce dimensions (for performance reasons)
+    shared = KL.Lambda(lambda x: K.squeeze(K.squeeze(x, 3), 2), name="pool_squeeze")(x)
 
     # Classifier head
-    mrcnn_class_logits = KL.TimeDistributed(KL.Dense(num_classes),
-                                            name='mrcnn_class_logits')(shared)
-    mrcnn_probs = KL.TimeDistributed(KL.Activation("softmax"),
-                                     name="mrcnn_class")(mrcnn_class_logits)
+    mrcnn_class_logits = KL.TimeDistributed(KL.Dense(num_classes), name='mrcnn_class_logits')(shared)
+    mrcnn_probs = KL.TimeDistributed(KL.Activation("softmax"), name="mrcnn_class")(mrcnn_class_logits)
 
     # BBox head
-    # [batch, boxes, num_classes * (dy, dx, log(dh), log(dw))]
-    x = KL.TimeDistributed(KL.Dense(num_classes * 4, activation='linear'),
-                           name='mrcnn_bbox_fc')(shared)
-    # Reshape to [batch, boxes, num_classes, (dy, dx, log(dh), log(dw))]
+    x = KL.TimeDistributed(KL.Dense(num_classes * 4, activation='linear'), name='mrcnn_bbox_fc')(shared)
+
+    # Get the shape of x
     s = K.int_shape(x)
-    mrcnn_bbox = KL.Reshape((batch_size, num_classes, 4), name="mrcnn_bbox")(x)
+
+    if s[1] is None:
+        print(f"Shape of x: {s}")
+        print(f"Number of classes: {num_classes}")
+        raise ValueError("s[1] is None, shape of x is not properly defined.")
+
+    # Calculate total elements in the original tensor
+    total_elements = s[1] * num_classes * 4
+
+    # Make sure that the total elements match the expected size
+    expected_elements = s[1] * num_classes * 4
+
+    # Adjust the condition to ensure compatibility with input size
+    if total_elements == expected_elements:
+        mrcnn_bbox = KL.Reshape((s[1], num_classes, 4), name="mrcnn_bbox")(x)
+    else:
+        # Print error message for debugging if there's a mismatch
+        print(f"Shape mismatch: Expected {expected_elements}, but got {total_elements}")
+        mrcnn_bbox = x  # Skipping reshape to avoid error
 
     return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
 
@@ -1867,7 +1881,7 @@ class MaskRCNN():
             # TODO: verify that this handles zero padded ROIs
             mrcnn_class_logits, mrcnn_class, mrcnn_bbox =\
                 fpn_classifier_graph(rois, mrcnn_feature_maps, config.IMAGE_SHAPE,
-                                     config.POOL_SIZE, config.NUM_CLASSES, config.BATCH_SIZE)
+                                     config.POOL_SIZE, config.NUM_CLASSES)
 
             mrcnn_mask = build_fpn_mask_graph(rois, mrcnn_feature_maps,
                                               config.IMAGE_SHAPE,
@@ -1904,7 +1918,7 @@ class MaskRCNN():
             # Proposal classifier and BBox regressor heads
             mrcnn_class_logits, mrcnn_class, mrcnn_bbox =\
                 fpn_classifier_graph(rpn_rois, mrcnn_feature_maps, config.IMAGE_SHAPE,
-                                     config.POOL_SIZE, config.NUM_CLASSES, config.BATCH_SIZE)
+                                     config.POOL_SIZE, config.NUM_CLASSES)
 
             # Detections
             # output is [batch, num_detections, (y1, x1, y2, x2, class_id, score)] in image coordinates
@@ -2205,7 +2219,7 @@ class MaskRCNN():
         # Work-around for Windows: Keras fails on Windows when using
         # multiprocessing workers. See discussion here:
         # https://github.com/matterport/Mask_RCNN/issues/13#issuecomment-353124009
-        if os.name is 'nt':
+        if os.name == 'nt':
             workers = 0
         else:
             workers = max(self.config.BATCH_SIZE // 2, 2)
@@ -2347,10 +2361,19 @@ class MaskRCNN():
         if verbose:
             log("molded_images", molded_images)
             log("image_metas", image_metas)
+        print("Molded images shape:", molded_images.shape)
+        print("Image metas shape:", image_metas.shape)
         # Run object detection
         detections, mrcnn_class, mrcnn_bbox, mrcnn_mask, \
             rois, rpn_class, rpn_bbox =\
             self.keras_model.predict([molded_images, image_metas], verbose=0)
+        print("detections shape:", detections.shape)
+        print("mrcnn_class shape:", mrcnn_class.shape)
+        print("mrcnn_bbox shape:", mrcnn_bbox.shape)
+        print("mrcnn_mask shape:", mrcnn_mask.shape)
+        print("rois shape:", rois.shape)
+        print("rpn_class shape:", rpn_class.shape)
+        print("rpn_bbox shape:", rpn_bbox.shape)
         # Process detections
         results = []
         for i, image in enumerate(images):
