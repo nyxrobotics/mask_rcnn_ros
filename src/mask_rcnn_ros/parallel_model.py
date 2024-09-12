@@ -13,10 +13,10 @@ https://github.com/avolkov1/keras_experiments/blob/master/keras_exp/multigpu/
 https://github.com/fchollet/keras/blob/master/keras/utils/training_utils.py
 """
 
+import keras.backend as K
+import keras.layers as KL
+import keras.models as KM
 import tensorflow as tf
-import tensorflow.keras.backend as K
-import tensorflow.keras.layers as KL
-import tensorflow.keras.models as KM
 
 
 class ParallelModel(KM.Model):
@@ -69,7 +69,7 @@ class ParallelModel(KM.Model):
         # Run the model call() on each GPU to place the ops there
         for i in range(self.gpu_count):
             with tf.device('/gpu:%d' % i):
-                with tf.name_scope('tower_%d' % i):
+                with tf.compat.v1.name_scope('tower_%d' % i):
                     # Run a slice of inputs through this replica
                     zipped_inputs = zip(self.inner_model.input_names,
                                         self.inner_model.inputs)
@@ -89,16 +89,18 @@ class ParallelModel(KM.Model):
         with tf.device('/cpu:0'):
             merged = []
             for outputs, name in zip(outputs_all, output_names):
-                # If outputs are numbers without dimensions, add a batch dim.
-                def add_dim(tensor):
-                    """Add a dimension to tensors that don't have any."""
-                    if K.int_shape(tensor) == ():
-                        return KL.Lambda(lambda t: K.reshape(t, [1, 1]))(tensor)
-                    return tensor
-                outputs = list(map(add_dim, outputs))
-
-                # Concatenate
-                merged.append(KL.Concatenate(axis=0, name=name)(outputs))
+                # Concatenate or average outputs?
+                # Outputs usually have a batch dimension and we concatenate
+                # across it. If they don't, then the output is likely a loss
+                # or a metric value that gets averaged across the batch.
+                # Keras expects losses and metrics to be scalars.
+                if K.int_shape(outputs[0]) == ():
+                    # Average
+                    m = KL.Lambda(lambda o: tf.add_n(o) / len(outputs), name=name)(outputs)
+                else:
+                    # Concatenate
+                    m = KL.Concatenate(axis=0, name=name)(outputs)
+                merged.append(m)
         return merged
 
 
@@ -111,24 +113,24 @@ if __name__ == "__main__":
 
     import os
 
+    import keras.optimizers
     import numpy as np
-    import tensorflow.keras.optimizers
-    from tensorflow.keras.datasets import mnist
-    from tensorflow.keras.preprocessing.image import ImageDataGenerator
+    from keras.datasets import mnist
+    from keras.preprocessing.image import ImageDataGenerator
 
     GPU_COUNT = 2
 
     # Root directory of the project
-    ROOT_DIR = os.getcwd()
+    ROOT_DIR = os.path.abspath("../")
 
     # Directory to save logs and trained model
-    MODEL_DIR = os.path.join(ROOT_DIR, "logs/parallel")
+    MODEL_DIR = os.path.join(ROOT_DIR, "logs")
 
     def build_model(x_train, num_classes):
         # Reset default graph. Keras leaves old ops in the graph,
         # which are ignored for execution but clutter graph
         # visualization in TensorBoard.
-        tf.reset_default_graph()
+        tf.compat.v1.reset_default_graph()
 
         inputs = KL.Input(shape=x_train.shape[1:], name="input_image")
         x = KL.Conv2D(32, (3, 3), activation='relu', padding="same",
@@ -157,7 +159,7 @@ if __name__ == "__main__":
     # Add multi-GPU support.
     model = ParallelModel(model, GPU_COUNT)
 
-    optimizer = tf.keras.optimizers.SGD(lr=0.01, momentum=0.9, clipnorm=5.0)
+    optimizer = keras.optimizers.SGD(lr=0.01, momentum=0.9, clipnorm=5.0)
 
     model.compile(loss='sparse_categorical_crossentropy',
                   optimizer=optimizer, metrics=['accuracy'])
@@ -169,6 +171,6 @@ if __name__ == "__main__":
         datagen.flow(x_train, y_train, batch_size=64),
         steps_per_epoch=50, epochs=10, verbose=1,
         validation_data=(x_test, y_test),
-        callbacks=[tf.keras.callbacks.TensorBoard(log_dir=MODEL_DIR,
-                                                  write_graph=True)]
+        callbacks=[keras.callbacks.TensorBoard(log_dir=MODEL_DIR,
+                                               write_graph=True)]
     )
