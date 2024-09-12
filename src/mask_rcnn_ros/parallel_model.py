@@ -14,9 +14,9 @@ https://github.com/fchollet/keras/blob/master/keras/utils/training_utils.py
 """
 
 import tensorflow as tf
-import keras.backend as K
-import keras.layers as KL
-import keras.models as KM
+import tensorflow.keras.backend as K
+import tensorflow.keras.layers as KL
+import tensorflow.keras.models as KM
 
 
 class ParallelModel(KM.Model):
@@ -110,8 +110,9 @@ if __name__ == "__main__":
     # python3 parallel_model.py
 
     import os
-    import numpy as np
+
     import keras.optimizers
+    import numpy as np
     from keras.datasets import mnist
     from keras.preprocessing.image import ImageDataGenerator
 

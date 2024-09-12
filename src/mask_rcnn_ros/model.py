@@ -1,51 +1,46 @@
 """
 Mask R-CNN
-The main Mask R-CNN model implemenetation.
+The main Mask R-CNN model implementation.
 
 Copyright (c) 2017 Matterport, Inc.
 Licensed under the MIT License (see LICENSE for details)
 Written by Waleed Abdulla
 """
 
-import os
-import sys
-import glob
-import random
-import math
 import datetime
+import glob
 import itertools
 import json
-import re
 import logging
+import math
+import os
+import random
+import re
+import sys
 from collections import OrderedDict
+
 import numpy as np
-import scipy.misc
 import tensorflow as tf
-import keras
-import keras.backend as K
-import keras.layers as KL
-import keras.initializers as KI
-import keras.engine as KE
-import keras.models as KM
+from tensorflow import keras
+from tensorflow.keras import backend as K
+from tensorflow.keras import initializers as KI
+from tensorflow.keras import layers as KL
+from tensorflow.keras import models as KM
 
-import utils
+from . import utils
 
-# Requires TensorFlow 1.3+ and Keras 2.0.8+.
-from distutils.version import LooseVersion
-assert LooseVersion(tf.__version__) >= LooseVersion("1.3")
-assert LooseVersion(keras.__version__) >= LooseVersion('2.0.8')
-
+# Requires TensorFlow 2.0+
+assert tf.__version__ >= "2.0"
 
 ############################################################
 #  Utility Functions
 ############################################################
 
+
 def log(text, array=None):
-    """Prints a text message. And, optionally, if a Numpy array is provided it
-    prints it's shape, min, and max values.
-    """
+    """Prints a text message. If a Numpy array is provided it prints its shape, min, and max values."""
     if array is not None:
-        text = text.ljust(25)
+        text is text.ljust(25)
         text += ("shape: {:20}  min: {:10.5f}  max: {:10.5f}".format(
             str(array.shape),
             array.min() if array.size else "",
@@ -55,33 +50,24 @@ def log(text, array=None):
 
 class BatchNorm(KL.BatchNormalization):
     """Batch Normalization class. Subclasses the Keras BN class and
-    hardcodes training=False so the BN layer doesn't update
-    during training.
-
-    Batch normalization has a negative effect on training if batches are small
-    so we disable it here.
-    """
+    hardcodes training=False so the BN layer doesn't update during training."""
 
     def call(self, inputs, training=None):
-        return super(self.__class__, self).call(inputs, training=False)
+        return super(BatchNorm, self).call(inputs, training=False)
 
 
 ############################################################
 #  Resnet Graph
 ############################################################
-
-# Code adopted from:
-# https://github.com/fchollet/deep-learning-models/blob/master/resnet50.py
-
 def identity_block(input_tensor, kernel_size, filters, stage, block,
                    use_bias=True):
-    """The identity_block is the block that has no conv layer at shortcut
+    """The identity block that has no conv layer at the shortcut.
     # Arguments
         input_tensor: input tensor
-        kernel_size: defualt 3, the kernel size of middle conv layer at main path
-        filters: list of integers, the nb_filters of 3 conv layer at main path
+        kernel_size: default is 3, the kernel size of the middle conv layer at the main path
+        filters: list of integers, the number of filters for each conv layer in the main path
         stage: integer, current stage label, used for generating layer names
-        block: 'a','b'..., current block label, used for generating layer names
+        block: string, block label, used for generating layer names
     """
     nb_filter1, nb_filter2, nb_filter3 = filters
     conv_name_base = 'res' + str(stage) + block + '_branch'
@@ -108,15 +94,14 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
 
 def conv_block(input_tensor, kernel_size, filters, stage, block,
                strides=(2, 2), use_bias=True):
-    """conv_block is the block that has a conv layer at shortcut
+    """A conv block that has a conv layer at the shortcut.
     # Arguments
         input_tensor: input tensor
-        kernel_size: defualt 3, the kernel size of middle conv layer at main path
-        filters: list of integers, the nb_filters of 3 conv layer at main path
+        kernel_size: default is 3, the kernel size of the middle conv layer at the main path
+        filters: list of integers, the number of filters for each conv layer in the main path
         stage: integer, current stage label, used for generating layer names
-        block: 'a','b'..., current block label, used for generating layer names
-    Note that from stage 3, the first conv layer at main path is with subsample=(2,2)
-    And the shortcut should have subsample=(2,2) as well
+        block: string, block label, used for generating layer names
+        strides: strides for the first conv layer
     """
     nb_filter1, nb_filter2, nb_filter3 = filters
     conv_name_base = 'res' + str(stage) + block + '_branch'
@@ -132,8 +117,8 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
     x = BatchNorm(axis=3, name=bn_name_base + '2b')(x)
     x = KL.Activation('relu')(x)
 
-    x = KL.Conv2D(nb_filter3, (1, 1), name=conv_name_base +
-                  '2c', use_bias=use_bias)(x)
+    x = KL.Conv2D(nb_filter3, (1, 1), name=conv_name_base + '2c',
+                  use_bias=use_bias)(x)
     x = BatchNorm(axis=3, name=bn_name_base + '2c')(x)
 
     shortcut = KL.Conv2D(nb_filter3, (1, 1), strides=strides,
@@ -146,6 +131,12 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
 
 
 def resnet_graph(input_image, architecture, stage5=False):
+    """Builds a ResNet graph with specified architecture.
+    # Arguments:
+        input_image: the input tensor
+        architecture: string, can be "resnet50" or "resnet101"
+        stage5: Boolean, If True, adds Stage 5 to the network.
+    """
     assert architecture in ["resnet50", "resnet101"]
     # Stage 1
     x = KL.ZeroPadding2D((3, 3))(input_image)
@@ -177,10 +168,10 @@ def resnet_graph(input_image, architecture, stage5=False):
         C5 = None
     return [C1, C2, C3, C4, C5]
 
-
 ############################################################
 #  Proposal Layer
 ############################################################
+
 
 def apply_box_deltas_graph(boxes, deltas):
     """Applies the given deltas to the given boxes.
@@ -200,10 +191,9 @@ def apply_box_deltas_graph(boxes, deltas):
     # Convert back to y1, x1, y2, x2
     y1 = center_y - 0.5 * height
     x1 = center_x - 0.5 * width
-    y2 = y1 + height
-    x2 = x1 + width
-    result = tf.stack([y1, x1, y2, x2], axis=1, name="apply_box_deltas_out")
-    return result
+    y2 = center_y + 0.5 * height
+    x2 = center_x + 0.5 * width
+    return tf.stack([y1, x1, y2, x2], axis=1)
 
 
 def clip_boxes_graph(boxes, window):
@@ -223,7 +213,7 @@ def clip_boxes_graph(boxes, window):
     return clipped
 
 
-class ProposalLayer(KE.Layer):
+class ProposalLayer(KL.Layer):
     """Receives anchor scores and selects a subset to pass as proposals
     to the second stage. Filtering is done based on anchor scores and
     non-max suppression to remove overlaps. It also applies bounding
@@ -315,11 +305,11 @@ class ProposalLayer(KE.Layer):
 ############################################################
 
 def log2_graph(x):
-    """Implementatin of Log2. TF doesn't have a native implemenation."""
-    return tf.log(x) / tf.log(2.0)
+    # Before: return tf.log(x) / tf.log(2.0)
+    return tf.math.log(x) / tf.math.log(2.0)
 
 
-class PyramidROIAlign(KE.Layer):
+class PyramidROIAlign(KL.Layer):
     """Implements ROI Pooling on multiple levels of the feature pyramid.
 
     Params:
@@ -523,8 +513,8 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
 
     # Subsample ROIs. Aim for 33% positive
     # Positive ROIs
-    positive_count = int(config.TRAIN_ROIS_PER_IMAGE *
-                         config.ROI_POSITIVE_RATIO)
+    positive_count = int(config.TRAIN_ROIS_PER_IMAGE
+                         * config.ROI_POSITIVE_RATIO)
     positive_indices = tf.random_shuffle(positive_indices)[:positive_count]
     positive_count = tf.shape(positive_indices)[0]
     # Negative ROIs. Add enough to maintain positive:negative ratio.
@@ -590,7 +580,7 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
     return rois, roi_gt_class_ids, deltas, masks
 
 
-class DetectionTargetLayer(KE.Layer):
+class DetectionTargetLayer(KL.Layer):
     """Subsamples proposals and generates target box refinment, class_ids,
     and masks for each.
 
@@ -738,7 +728,7 @@ def refine_detections(rois, probs, deltas, window, config):
     return result
 
 
-class DetectionLayer(KE.Layer):
+class DetectionLayer(KL.Layer):
     """Takes classified proposal boxes and their bounding box deltas and
     returns the final detection boxes.
 
@@ -773,7 +763,7 @@ class DetectionLayer(KE.Layer):
             return np.reshape(detections_batch, [self.config.BATCH_SIZE, self.config.DETECTION_MAX_INSTANCES, 6])
 
         # Return wrapped function
-        return tf.py_func(wrapper, inputs, tf.float32)
+        return tf.py_function(wrapper, inputs, tf.float32)
 
     def compute_output_shape(self, input_shape):
         return (None, self.config.DETECTION_MAX_INSTANCES, 6)
@@ -851,8 +841,7 @@ def build_rpn_model(anchor_stride, anchors_per_location, depth):
 #  Feature Pyramid Network Heads
 ############################################################
 
-def fpn_classifier_graph(rois, feature_maps,
-                         image_shape, pool_size, num_classes):
+def fpn_classifier_graph(rois, feature_maps, image_shape, pool_size, num_classes, batch_size):
     """Builds the computation graph of the feature pyramid network classifier
     and regressor heads.
 
@@ -900,7 +889,7 @@ def fpn_classifier_graph(rois, feature_maps,
                            name='mrcnn_bbox_fc')(shared)
     # Reshape to [batch, boxes, num_classes, (dy, dx, log(dh), log(dw))]
     s = K.int_shape(x)
-    mrcnn_bbox = KL.Reshape((s[1], num_classes, 4), name="mrcnn_bbox")(x)
+    mrcnn_bbox = KL.Reshape((batch_size, num_classes, 4), name="mrcnn_bbox")(x)
 
     return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
 
@@ -1424,8 +1413,8 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
         rpn_match[ids] = 0
     # Same for negative proposals
     ids = np.where(rpn_match == -1)[0]
-    extra = len(ids) - (config.RPN_TRAIN_ANCHORS_PER_IMAGE -
-                        np.sum(rpn_match == 1))
+    extra = len(ids) - (config.RPN_TRAIN_ANCHORS_PER_IMAGE
+                        - np.sum(rpn_match == 1))
     if extra > 0:
         # Rest the extra ones to neutral
         ids = np.random.choice(ids, extra, replace=False)
@@ -1500,10 +1489,10 @@ def generate_random_rois(image_shape, count, gt_class_ids, gt_boxes):
             x1x2 = np.random.randint(r_x1, r_x2, (rois_per_box * 2, 2))
             # Filter out zero area boxes
             threshold = 1
-            y1y2 = y1y2[np.abs(y1y2[:, 0] - y1y2[:, 1]) >=
-                        threshold][:rois_per_box]
-            x1x2 = x1x2[np.abs(x1x2[:, 0] - x1x2[:, 1]) >=
-                        threshold][:rois_per_box]
+            y1y2 = y1y2[np.abs(y1y2[:, 0] - y1y2[:, 1])
+                        >= threshold][:rois_per_box]
+            x1x2 = x1x2[np.abs(x1x2[:, 0] - x1x2[:, 1])
+                        >= threshold][:rois_per_box]
             if y1y2.shape[0] == rois_per_box and x1x2.shape[0] == rois_per_box:
                 break
 
@@ -1524,10 +1513,10 @@ def generate_random_rois(image_shape, count, gt_class_ids, gt_boxes):
         x1x2 = np.random.randint(0, image_shape[1], (remaining_count * 2, 2))
         # Filter out zero area boxes
         threshold = 1
-        y1y2 = y1y2[np.abs(y1y2[:, 0] - y1y2[:, 1]) >=
-                    threshold][:remaining_count]
-        x1x2 = x1x2[np.abs(x1x2[:, 0] - x1x2[:, 1]) >=
-                    threshold][:remaining_count]
+        y1y2 = y1y2[np.abs(y1y2[:, 0] - y1y2[:, 1])
+                    >= threshold][:remaining_count]
+        x1x2 = x1x2[np.abs(x1x2[:, 0] - x1x2[:, 1])
+                    >= threshold][:remaining_count]
         if y1y2.shape[0] == remaining_count and x1x2.shape[0] == remaining_count:
             break
 
@@ -1702,7 +1691,7 @@ def data_generator(dataset, config, shuffle=True, augment=True, random_rois=0,
                 b = 0
         except (GeneratorExit, KeyboardInterrupt):
             raise
-        except:
+        except BaseException:
             # Log it and skip the image
             logging.exception("Error processing image {}".format(
                 dataset.image_info[image_id]))
@@ -1878,7 +1867,7 @@ class MaskRCNN():
             # TODO: verify that this handles zero padded ROIs
             mrcnn_class_logits, mrcnn_class, mrcnn_bbox =\
                 fpn_classifier_graph(rois, mrcnn_feature_maps, config.IMAGE_SHAPE,
-                                     config.POOL_SIZE, config.NUM_CLASSES)
+                                     config.POOL_SIZE, config.NUM_CLASSES, config.BATCH_SIZE)
 
             mrcnn_mask = build_fpn_mask_graph(rois, mrcnn_feature_maps,
                                               config.IMAGE_SHAPE,
@@ -1915,7 +1904,7 @@ class MaskRCNN():
             # Proposal classifier and BBox regressor heads
             mrcnn_class_logits, mrcnn_class, mrcnn_bbox =\
                 fpn_classifier_graph(rpn_rois, mrcnn_feature_maps, config.IMAGE_SHAPE,
-                                     config.POOL_SIZE, config.NUM_CLASSES)
+                                     config.POOL_SIZE, config.NUM_CLASSES, config.BATCH_SIZE)
 
             # Detections
             # output is [batch, num_detections, (y1, x1, y2, x2, class_id, score)] in image coordinates
@@ -1979,7 +1968,7 @@ class MaskRCNN():
         exlude: list of layer names to excluce
         """
         import h5py
-        from keras.engine import topology
+        from tensorflow.python.keras.saving import hdf5_format
 
         if exclude:
             by_name = True
@@ -2001,9 +1990,9 @@ class MaskRCNN():
             layers = filter(lambda l: l.name not in exclude, layers)
 
         if by_name:
-            topology.load_weights_from_hdf5_group_by_name(f, layers)
+            hdf5_format.load_weights_from_hdf5_group_by_name(f, layers)
         else:
-            topology.load_weights_from_hdf5_group(f, layers)
+            hdf5_format.load_weights_from_hdf5_group(f, layers)
         if hasattr(f, 'close'):
             f.close()
 
@@ -2468,10 +2457,10 @@ def compose_image_meta(image_id, image_shape, window, active_class_ids):
         where not all classes are present in all datasets.
     """
     meta = np.array(
-        [image_id] +            # size=1
-        list(image_shape) +     # size=3
-        list(window) +          # size=4 (y1, x1, y2, x2) in image cooredinates
-        list(active_class_ids)  # size=num_classes
+        [image_id]            # size=1
+        + list(image_shape)     # size=3
+        + list(window)          # size=4 (y1, x1, y2, x2) in image cooredinates
+        + list(active_class_ids)  # size=num_classes
     )
     return meta
 

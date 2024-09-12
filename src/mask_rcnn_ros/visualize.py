@@ -7,23 +7,24 @@ Licensed under the MIT License (see LICENSE for details)
 Written by Waleed Abdulla
 """
 
-import random
-import itertools
 import colorsys
-import numpy as np
-from skimage.measure import find_contours
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import matplotlib.lines as lines
-from matplotlib.patches import Polygon
+import itertools
+import random
+
 import IPython.display
+import matplotlib.lines as lines
+import matplotlib.patches as patches
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.patches import Polygon
+from skimage.measure import find_contours
 
-import utils
-
+from . import utils
 
 ############################################################
 #  Visualization
 ############################################################
+
 
 def display_images(images, titles=None, cols=4, cmap=None, norm=None,
                    interpolation=None):
@@ -67,8 +68,8 @@ def apply_mask(image, mask, color, alpha=0.5):
     """
     for c in range(3):
         image[:, :, c] = np.where(mask == 1,
-                                  image[:, :, c] *
-                                  (1 - alpha) + alpha * color[c] * 255,
+                                  image[:, :, c]
+                                  * (1 - alpha) + alpha * color[c] * 255,
                                   image[:, :, c])
     return image
 
@@ -147,7 +148,7 @@ def display_instances(image, boxes, masks, class_ids, class_names,
             p = Polygon(verts, facecolor="none", edgecolor=color)
             ax.add_patch(p)
     ax.imshow(masked_image.astype(np.uint8))
-    #plt.show()
+    # plt.show()
 
 
 def draw_rois(image, rois, refined_rois, mask, class_ids, class_names, limit=10):

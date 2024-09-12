@@ -1,22 +1,21 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import os
 import threading
-from Queue import Queue
-import numpy as np
+from queue import Queue
 
 import cv2
-from cv_bridge import CvBridge
+import numpy as np
 import rospy
+from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import RegionOfInterest
 from std_msgs.msg import UInt8MultiArray
 
 from mask_rcnn_ros import coco
-from mask_rcnn_ros import utils
 from mask_rcnn_ros import model as modellib
+from mask_rcnn_ros import utils
 from mask_rcnn_ros import visualize
 from mask_rcnn_ros.msg import Result
-
 
 # Local path to trained weights file
 ROS_HOME = os.environ.get('ROS_HOME', os.path.join(os.environ['HOME'], '.ros'))
@@ -48,6 +47,7 @@ class InferenceConfig(coco.CocoConfig):
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
 
+
 class MaskRCNNNode(object):
     def __init__(self):
         self._cv_bridge = CvBridge()
@@ -67,7 +67,6 @@ class MaskRCNNNode(object):
             utils.download_trained_weights(COCO_MODEL_PATH)
 
         self._model.load_weights(model_path, by_name=True)
-
         self._class_names = rospy.get_param('~class_names', CLASS_NAMES)
 
         self._last_msg = None
@@ -117,10 +116,10 @@ class MaskRCNNNode(object):
         result_msg.header = msg.header
         for i, (y1, x1, y2, x2) in enumerate(result['rois']):
             box = RegionOfInterest()
-            box.x_offset = np.asscalar(x1)
-            box.y_offset = np.asscalar(y1)
-            box.height = np.asscalar(y2 - y1)
-            box.width = np.asscalar(x2 - x1)
+            box.x_offset = int(x1)
+            box.y_offset = int(y1)
+            box.height = int(y2 - y1)
+            box.width = int(x2 - x1)
             result_msg.boxes.append(box)
 
             class_id = result['class_ids'][i]
@@ -156,7 +155,7 @@ class MaskRCNNNode(object):
                                     class_colors=self._class_colors)
         fig.tight_layout()
         canvas.draw()
-        result = np.fromstring(canvas.tostring_rgb(), dtype='uint8')
+        result = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
 
         _, _, w, h = fig.bbox.bounds
         result = result.reshape((int(h), int(w), 3))
@@ -168,11 +167,12 @@ class MaskRCNNNode(object):
             self._last_msg = msg
             self._msg_lock.release()
 
+
 def main():
     rospy.init_node('mask_rcnn')
-
     node = MaskRCNNNode()
     node.run()
+
 
 if __name__ == '__main__':
     main()

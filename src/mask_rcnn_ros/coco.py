@@ -28,8 +28,16 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 """
 
 import os
+import shutil
 import time
+import zipfile
+
 import numpy as np
+from six.moves.urllib import request
+
+from . import model as modellib
+from . import utils
+from .config import Config
 
 # Download and install the Python COCO tools from https://github.com/waleedka/coco
 # That's a fork from the original https://github.com/pdollar/coco with a bug
@@ -41,13 +49,6 @@ import numpy as np
 # from pycocotools.cocoeval import COCOeval
 # from pycocotools import mask as maskUtils
 
-import zipfile
-from six.moves.urllib import request
-import shutil
-
-from config import Config
-import utils
-import model as modellib
 
 # Root directory of the project
 ROOT_DIR = os.path.dirname(__file__)
@@ -510,7 +511,12 @@ if __name__ == '__main__':
     elif args.command == "evaluate":
         # Validation dataset
         dataset_val = CocoDataset()
-        coco = dataset_val.load_coco(args.dataset, "minival", year=args.year, return_coco=True, auto_download=args.download)
+        coco = dataset_val.load_coco(
+            args.dataset,
+            "minival",
+            year=args.year,
+            return_coco=True,
+            auto_download=args.download)
         dataset_val.prepare()
         print("Running COCO evaluation on {} images.".format(args.limit))
         evaluate_coco(model, dataset_val, coco, "bbox", limit=int(args.limit))

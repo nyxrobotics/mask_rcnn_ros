@@ -7,18 +7,19 @@ Licensed under the MIT License (see LICENSE for details)
 Written by Waleed Abdulla
 """
 
-import sys
-import os
+import contextlib
 import math
+import os
 import random
+import shutil
+import sys
+
 import numpy as np
-import tensorflow as tf
 import scipy.misc
 import skimage.color
 import skimage.io
+import tensorflow as tf
 from six.moves.urllib import request
-import shutil
-import contextlib
 
 # URL from which to download the latest COCO trained weights
 COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
@@ -628,8 +629,8 @@ def compute_ap(gt_boxes, gt_class_ids,
 
     # Compute mean AP over recall range
     indices = np.where(recalls[:-1] != recalls[1:])[0] + 1
-    mAP = np.sum((recalls[indices] - recalls[indices - 1]) *
-                 precisions[indices])
+    mAP = np.sum((recalls[indices] - recalls[indices - 1])
+                 * precisions[indices])
 
     return mAP, precisions, recalls, overlaps
 
