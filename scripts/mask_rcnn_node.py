@@ -1,21 +1,20 @@
 #!/usr/bin/env python
 import os
 import threading
-import numpy as np
-import cv2
-from cv_bridge import CvBridge
-import matplotlib.pyplot as plt
 
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
 import rospy
+from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import RegionOfInterest
 
 from mask_rcnn_ros import coco
-from mask_rcnn_ros import utils
 from mask_rcnn_ros import model as modellib
+from mask_rcnn_ros import utils
 from mask_rcnn_ros import visualize
 from mask_rcnn_ros.msg import Result
-
 
 # Local path to trained weights file
 ROS_HOME = os.environ.get('ROS_HOME', os.path.join(os.environ['HOME'], '.ros'))
@@ -47,6 +46,7 @@ class InferenceConfig(coco.CocoConfig):
     # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
+
 
 class MaskRCNNNode(object):
     def __init__(self):

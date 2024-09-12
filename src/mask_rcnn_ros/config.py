@@ -8,12 +8,13 @@ Written by Waleed Abdulla
 """
 
 import math
-import numpy as np
 
+import numpy as np
 
 # Base Configuration Class
 # Don't use this class directly. Instead, sub-class it and override
 # the configurations you need to change.
+
 
 class Config(object):
     """Base configuration class. For custom configurations, create a

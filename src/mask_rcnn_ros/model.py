@@ -7,33 +7,32 @@ Licensed under the MIT License (see LICENSE for details)
 Written by Waleed Abdulla
 """
 
-import os
-import sys
-import glob
-import random
-import math
 import datetime
+import glob
 import itertools
 import json
-import re
 import logging
+import math
+import os
+import random
+import re
+import sys
 from collections import OrderedDict
+# Requires TensorFlow 1.3+ and Keras 2.0.8+.
+from distutils.version import LooseVersion
+
 import numpy as np
 import scipy.misc
 import tensorflow as tf
-import keras
-import keras.backend as K
-import keras.layers as KL
-import keras.initializers as KI
-import keras.engine as KE
-import keras.models as KM
+import tensorflow.keras
+import tensorflow.keras.backend as K
+import tensorflow.keras.initializers as KI
+import tensorflow.keras.layers as KL
+import tensorflow.keras.models as KM
 
-import utils
+from . import utils
 
-# Requires TensorFlow 1.3+ and Keras 2.0.8+.
-from distutils.version import LooseVersion
-assert LooseVersion(tf.__version__) >= LooseVersion("1.3")
-assert LooseVersion(keras.__version__) >= LooseVersion('2.0.8')
+assert LooseVersion(tf.__version__) >= LooseVersion("2.0")
 
 
 ############################################################
@@ -132,8 +131,8 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
     x = BatchNorm(axis=3, name=bn_name_base + '2b')(x)
     x = KL.Activation('relu')(x)
 
-    x = KL.Conv2D(nb_filter3, (1, 1), name=conv_name_base +
-                  '2c', use_bias=use_bias)(x)
+    x = KL.Conv2D(nb_filter3, (1, 1), name=conv_name_base
+                  + '2c', use_bias=use_bias)(x)
     x = BatchNorm(axis=3, name=bn_name_base + '2c')(x)
 
     shortcut = KL.Conv2D(nb_filter3, (1, 1), strides=strides,
@@ -224,7 +223,7 @@ def clip_boxes_graph(boxes, window):
     return clipped
 
 
-class ProposalLayer(KE.Layer):
+class ProposalLayer(KL.Layer):
     """Receives anchor scores and selects a subset to pass as proposals
     to the second stage. Filtering is done based on anchor scores and
     non-max suppression to remove overlaps. It also applies bounding
@@ -317,10 +316,10 @@ class ProposalLayer(KE.Layer):
 
 def log2_graph(x):
     """Implementatin of Log2. TF doesn't have a native implemenation."""
-    return tf.log(x) / tf.log(2.0)
+    return tf.math.log(x) / tf.math.log(2.0)
 
 
-class PyramidROIAlign(KE.Layer):
+class PyramidROIAlign(KL.Layer):
     """Implements ROI Pooling on multiple levels of the feature pyramid.
 
     Params:
@@ -520,12 +519,12 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
     positive_roi_bool = (roi_iou_max >= 0.5)
     positive_indices = tf.where(positive_roi_bool)[:, 0]
     # 2. Negative ROIs are those with < 0.5 with every GT box. Skip crowds.
-    negative_indices = tf.where(tf.logical_and(roi_iou_max < 0.5, no_crowd_bool))[:, 0]
+    negative_indices = tf.where(tf.math.logical_and(roi_iou_max < 0.5, no_crowd_bool))[:, 0]
 
     # Subsample ROIs. Aim for 33% positive
     # Positive ROIs
-    positive_count = int(config.TRAIN_ROIS_PER_IMAGE *
-                         config.ROI_POSITIVE_RATIO)
+    positive_count = int(config.TRAIN_ROIS_PER_IMAGE
+                         * config.ROI_POSITIVE_RATIO)
     positive_indices = tf.random_shuffle(positive_indices)[:positive_count]
     positive_count = tf.shape(positive_indices)[0]
     # Negative ROIs. Add enough to maintain positive:negative ratio.
@@ -591,7 +590,7 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
     return rois, roi_gt_class_ids, deltas, masks
 
 
-class DetectionTargetLayer(KE.Layer):
+class DetectionTargetLayer(KL.Layer):
     """Subsamples proposals and generates target box refinement, class_ids,
     and masks for each.
 
@@ -717,7 +716,7 @@ def refine_detections_graph(rois, probs, deltas, window, config):
     # 1. Prepare variables
     pre_nms_class_ids = tf.gather(class_ids, keep)
     pre_nms_scores = tf.gather(class_scores, keep)
-    pre_nms_rois = tf.gather(refined_rois,   keep)
+    pre_nms_rois = tf.gather(refined_rois, keep)
     unique_pre_nms_class_ids = tf.unique(pre_nms_class_ids)[0]
 
     def nms_keep_map(class_id):
@@ -726,10 +725,10 @@ def refine_detections_graph(rois, probs, deltas, window, config):
         ixs = tf.where(tf.equal(pre_nms_class_ids, class_id))[:, 0]
         # Apply NMS
         class_keep = tf.image.non_max_suppression(
-                tf.to_float(tf.gather(pre_nms_rois, ixs)),
-                tf.gather(pre_nms_scores, ixs),
-                max_output_size=config.DETECTION_MAX_INSTANCES,
-                iou_threshold=config.DETECTION_NMS_THRESHOLD)
+            tf.to_float(tf.gather(pre_nms_rois, ixs)),
+            tf.gather(pre_nms_scores, ixs),
+            max_output_size=config.DETECTION_MAX_INSTANCES,
+            iou_threshold=config.DETECTION_NMS_THRESHOLD)
         # Map indicies
         class_keep = tf.gather(keep, tf.gather(ixs, class_keep))
         # Pad with -1 so returned tensors have the same shape
@@ -763,7 +762,7 @@ def refine_detections_graph(rois, probs, deltas, window, config):
         tf.to_float(tf.gather(refined_rois, keep)),
         tf.to_float(tf.gather(class_ids, keep))[..., tf.newaxis],
         tf.gather(class_scores, keep)[..., tf.newaxis]
-        ], axis=1)
+    ], axis=1)
 
     # Pad with zeros if detections < DETECTION_MAX_INSTANCES
     gap = config.DETECTION_MAX_INSTANCES - tf.shape(detections)[0]
@@ -771,7 +770,7 @@ def refine_detections_graph(rois, probs, deltas, window, config):
     return detections
 
 
-class DetectionLayer(KE.Layer):
+class DetectionLayer(KL.Layer):
     """Takes classified proposal boxes and their bounding box deltas and
     returns the final detection boxes.
 
@@ -1457,8 +1456,8 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
         rpn_match[ids] = 0
     # Same for negative proposals
     ids = np.where(rpn_match == -1)[0]
-    extra = len(ids) - (config.RPN_TRAIN_ANCHORS_PER_IMAGE -
-                        np.sum(rpn_match == 1))
+    extra = len(ids) - (config.RPN_TRAIN_ANCHORS_PER_IMAGE
+                        - np.sum(rpn_match == 1))
     if extra > 0:
         # Rest the extra ones to neutral
         ids = np.random.choice(ids, extra, replace=False)
@@ -1533,10 +1532,10 @@ def generate_random_rois(image_shape, count, gt_class_ids, gt_boxes):
             x1x2 = np.random.randint(r_x1, r_x2, (rois_per_box * 2, 2))
             # Filter out zero area boxes
             threshold = 1
-            y1y2 = y1y2[np.abs(y1y2[:, 0] - y1y2[:, 1]) >=
-                        threshold][:rois_per_box]
-            x1x2 = x1x2[np.abs(x1x2[:, 0] - x1x2[:, 1]) >=
-                        threshold][:rois_per_box]
+            y1y2 = y1y2[np.abs(y1y2[:, 0] - y1y2[:, 1])
+                        >= threshold][:rois_per_box]
+            x1x2 = x1x2[np.abs(x1x2[:, 0] - x1x2[:, 1])
+                        >= threshold][:rois_per_box]
             if y1y2.shape[0] == rois_per_box and x1x2.shape[0] == rois_per_box:
                 break
 
@@ -1557,10 +1556,10 @@ def generate_random_rois(image_shape, count, gt_class_ids, gt_boxes):
         x1x2 = np.random.randint(0, image_shape[1], (remaining_count * 2, 2))
         # Filter out zero area boxes
         threshold = 1
-        y1y2 = y1y2[np.abs(y1y2[:, 0] - y1y2[:, 1]) >=
-                    threshold][:remaining_count]
-        x1x2 = x1x2[np.abs(x1x2[:, 0] - x1x2[:, 1]) >=
-                    threshold][:remaining_count]
+        y1y2 = y1y2[np.abs(y1y2[:, 0] - y1y2[:, 1])
+                    >= threshold][:remaining_count]
+        x1x2 = x1x2[np.abs(x1x2[:, 0] - x1x2[:, 1])
+                    >= threshold][:remaining_count]
         if y1y2.shape[0] == remaining_count and x1x2.shape[0] == remaining_count:
             break
 
@@ -1735,7 +1734,7 @@ def data_generator(dataset, config, shuffle=True, augment=True, random_rois=0,
                 b = 0
         except (GeneratorExit, KeyboardInterrupt):
             raise
-        except:
+        except BaseException:
             # Log it and skip the image
             logging.exception("Error processing image {}".format(
                 dataset.image_info[image_id]))
@@ -2062,8 +2061,8 @@ class MaskRCNN():
         metrics. Then calls the Keras compile() function.
         """
         # Optimizer object
-        optimizer = keras.optimizers.SGD(lr=learning_rate, momentum=momentum,
-                                         clipnorm=5.0)
+        optimizer = tf.keras.optimizers.SGD(lr=learning_rate, momentum=momentum,
+                                            clipnorm=5.0)
         # Add Losses
         # First, clear previously set losses to avoid duplication
         self.keras_model._losses = []
@@ -2079,7 +2078,7 @@ class MaskRCNN():
 
         # Add L2 Regularization
         # Skip gamma and beta weights of batch normalization layers.
-        reg_losses = [keras.regularizers.l2(self.config.WEIGHT_DECAY)(w) / tf.cast(tf.size(w), tf.float32)
+        reg_losses = [tf.keras.regularizers.l2(self.config.WEIGHT_DECAY)(w) / tf.cast(tf.size(w), tf.float32)
                       for w in self.keras_model.trainable_weights
                       if 'gamma' not in w.name and 'beta' not in w.name]
         self.keras_model.add_loss(tf.add_n(reg_losses))
@@ -2210,10 +2209,10 @@ class MaskRCNN():
 
         # Callbacks
         callbacks = [
-            keras.callbacks.TensorBoard(log_dir=self.log_dir,
-                                        histogram_freq=0, write_graph=True, write_images=False),
-            keras.callbacks.ModelCheckpoint(self.checkpoint_path,
-                                            verbose=0, save_weights_only=True),
+            tf.keras.callbacks.TensorBoard(log_dir=self.log_dir,
+                                           histogram_freq=0, write_graph=True, write_images=False),
+            tf.keras.callbacks.ModelCheckpoint(self.checkpoint_path,
+                                               verbose=0, save_weights_only=True),
         ]
 
         # Train
@@ -2500,10 +2499,10 @@ def compose_image_meta(image_id, image_shape, window, active_class_ids):
         where not all classes are present in all datasets.
     """
     meta = np.array(
-        [image_id] +            # size=1
-        list(image_shape) +     # size=3
-        list(window) +          # size=4 (y1, x1, y2, x2) in image cooredinates
-        list(active_class_ids)  # size=num_classes
+        [image_id]            # size=1
+        + list(image_shape)     # size=3
+        + list(window)          # size=4 (y1, x1, y2, x2) in image cooredinates
+        + list(active_class_ids)  # size=num_classes
     )
     return meta
 
