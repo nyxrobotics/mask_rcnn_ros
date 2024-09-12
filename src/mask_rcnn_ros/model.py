@@ -2099,31 +2099,56 @@ class MaskRCNN(object):
         exclude: list of layer names to exclude
         """
         import h5py
+        import torch
         from tensorflow.python.keras.saving import hdf5_format
 
-        if exclude:
-            by_name = True
-
-        if h5py is None:
-            raise ImportError('`load_weights` requires h5py.')
-        with h5py.File(filepath, mode='r') as f:
-            if 'layer_names' not in f.attrs and 'model_weights' in f:
-                f = f['model_weights']
-
-            # In multi-GPU training, we wrap the model. Get layers
-            # of the inner model because they have the weights.
-            keras_model = self.keras_model
-            layers = keras_model.inner_model.layers if hasattr(keras_model, "inner_model")\
-                else keras_model.layers
-
-            # Exclude some layers
+        # Determine the file format based on the file extension
+        if filepath.endswith(".h5"):
+            # Load HDF5 weights
             if exclude:
-                layers = filter(lambda l: l.name not in exclude, layers)
+                by_name = True
 
-            if by_name:
-                hdf5_format.load_weights_from_hdf5_group_by_name(f, layers)
-            else:
-                hdf5_format.load_weights_from_hdf5_group(f, layers)
+            if h5py is None:
+                raise ImportError('`load_weights` requires h5py for HDF5 files.')
+
+            with h5py.File(filepath, mode='r') as f:
+                if 'layer_names' not in f.attrs and 'model_weights' in f:
+                    f = f['model_weights']
+
+                # In multi-GPU training, we wrap the model. Get layers
+                # of the inner model because they have the weights.
+                keras_model = self.keras_model
+                layers = keras_model.inner_model.layers if hasattr(keras_model, "inner_model") else keras_model.layers
+
+                # Exclude some layers if specified
+                if exclude:
+                    layers = filter(lambda l: l.name not in exclude, layers)
+
+                if by_name:
+                    hdf5_format.load_weights_from_hdf5_group_by_name(f, layers)
+                else:
+                    hdf5_format.load_weights_from_hdf5_group(f, layers)
+
+        elif filepath.endswith(".pth"):
+            # Load PyTorch weights
+            if torch is None:
+                raise ImportError('`load_weights` requires torch for PyTorch files.')
+
+            # Load the state dictionary from the PyTorch model file
+            state_dict = torch.load(filepath)
+
+            # If using multi-GPU, get the inner model
+            keras_model = self.keras_model
+            layers = keras_model.inner_model.layers if hasattr(keras_model, "inner_model") else keras_model.layers
+
+            # Map the PyTorch state dictionary to Keras layers manually
+            for layer in layers:
+                if layer.name in state_dict:
+                    weights = state_dict[layer.name].cpu().numpy()
+                    layer.set_weights([weights])
+
+        else:
+            raise ValueError("Unsupported file format. Use .h5 for TensorFlow/Keras models or .pth for PyTorch models.")
 
         # Update the log directory
         self.set_log_dir(filepath)
