@@ -6,6 +6,7 @@ from queue import Queue
 import cv2
 import numpy as np
 import rospy
+import torch
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import RegionOfInterest
@@ -66,7 +67,9 @@ class MaskRCNNNode(object):
         if model_path == COCO_MODEL_PATH and not os.path.exists(COCO_MODEL_PATH):
             utils.download_trained_weights(COCO_MODEL_PATH)
 
+        # Load weights onto CPU and transfer to model
         self._model.load_weights(model_path, by_name=True)
+
         self._class_names = rospy.get_param('~class_names', CLASS_NAMES)
 
         self._last_msg = None
